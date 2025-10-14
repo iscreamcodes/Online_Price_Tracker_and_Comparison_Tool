@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Comparison Tool</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            color: white;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .search-box {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            justify-content: center;
+        }
+
+        .search-box input {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 25px;
+            width: 300px;
+            font-size: 16px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .search-box button {
+            padding: 12px 30px;
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+
+        .search-box button:hover {
+            background: #ff5252;
+            transform: translateY(-2px);
+        }
+
+        .stats {
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            text-align: center;
+        }
+
+        .stat-item {
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .groups-container {
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+        }
+
+        .product-group {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .product-group:hover {
+            transform: translateY(-5px);
+        }
+
+        .group-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .group-info {
+            flex: 1;
+        }
+
+        .group-name {
+            font-size: 1.4rem;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+            line-height: 1.3;
+        }
+
+        .group-image {
+            width: 120px;
+            height: 120px;
+            border-radius: 10px;
+            object-fit: cover;
+            margin-left: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .product-type {
+            background: #667eea;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            display: inline-block;
+        }
+
+        .stores-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .store-item {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 12px;
+            border-left: 4px solid;
+            transition: all 0.3s ease;
+            display: flex;
+            gap: 15px;
+            align-items: flex-start;
+        }
+
+        .store-item:hover {
+            background: #e9ecef;
+            transform: translateX(5px);
+        }
+
+        .store-item.jumia { border-left-color: #ff6b6b; }
+        .store-item.ebay { border-left-color: #4ecdc4; }
+        .store-item.amazon { border-left-color: #45b7d1; }
+        .store-item.kilimall { border-left-color: #96ceb4; }
+
+        .store-image {
+            width: 80px;
+            height: 80px;
+            border-radius: 8px;
+            object-fit: cover;
+            flex-shrink: 0;
+        }
+
+        .store-content {
+            flex: 1;
+        }
+
+        .store-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 10px;
+        }
+
+        .store-name {
+            font-weight: bold;
+            color: #333;
+            text-transform: uppercase;
+            font-size: 0.9rem;
+            background: rgba(0,0,0,0.1);
+            padding: 3px 8px;
+            border-radius: 4px;
+        }
+
+        .store-price {
+            font-size: 1.3rem;
+            font-weight: bold;
+            color: #2c3e50;
+            text-align: right;
+        }
+
+        .store-currency {
+            color: #666;
+            font-size: 0.8rem;
+            display: block;
+        }
+
+        .store-rating {
+            color: #ffc107;
+            font-size: 0.9rem;
+            margin: 5px 0;
+        }
+
+        .store-link {
+            color: #667eea;
+            text-decoration: none;
+            font-size: 0.9rem;
+            display: inline-block;
+            margin-top: 8px;
+            font-weight: 500;
+        }
+
+        .store-link:hover {
+            text-decoration: underline;
+        }
+
+        .no-image {
+            width: 80px;
+            height: 80px;
+            background: #e9ecef;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            font-size: 0.8rem;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .loading {
+            text-align: center;
+            color: white;
+            font-size: 1.2rem;
+            margin: 50px 0;
+        }
+
+        .error {
+            background: #ff6b6b;
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .performance {
+            background: #2c3e50;
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+
+        .performance h3 {
+            margin-bottom: 10px;
+        }
+
+        .performance-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+        }
+
+        .performance-item {
+            text-align: center;
+            padding: 10px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 5px;
+        }
+
+        .price-comparison {
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(102, 126, 234, 0.1);
+            border-radius: 8px;
+            font-size: 0.9rem;
+        }
+
+        .best-price {
+            background: #4CAF50;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            margin-left: 5px;
+        }
+
+        @media (max-width: 768px) {
+            .search-box {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .search-box input {
+                width: 100%;
+                max-width: 300px;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .stores-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .store-item {
+                flex-direction: column;
+            }
+
+            .store-image, .no-image {
+                align-self: center;
+            }
+
+            .group-header {
+                flex-direction: column;
+            }
+
+            .group-image {
+                margin-left: 0;
+                margin-top: 15px;
+                align-self: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛍️ Price Comparison Tool</h1>
+            <p>Compare prices across multiple stores in real-time</p>
+        </div>
+
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="Search for products (e.g., iphone, laptop, samsung)" value="iphone">
+            <button onclick="searchProducts()">🔍 Search</button>
+        </div>
+
+        <div id="resultsContainer">
+            <div class="loading" id="loadingMessage">
+                🔄 Enter a product name and click Search to see results...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Auto-detect backend URL
+        const API_BASE_URL = 'http://localhost:5000/api';
+
+        // Helper function to find best price
+        function findBestPrice(stores) {
+            const prices = stores.map(store => {
+                const priceStr = store.price || '';
+                const priceMatch = priceStr.match(/(\d+[.,]?\d*)/);
+                return priceMatch ? parseFloat(priceMatch[1].replace(',', '')) : Infinity;
+            });
+            
+            const minPrice = Math.min(...prices.filter(p => p !== Infinity));
+            return prices.findIndex(p => p === minPrice);
+        }
+
+        async function searchProducts() {
+            const searchInput = document.getElementById('searchInput');
+            const query = searchInput.value.trim();
+            
+            if (!query) {
+                alert('Please enter a product name to search');
+                return;
+            }
+
+            const resultsContainer = document.getElementById('resultsContainer');
+            resultsContainer.innerHTML = `
+                <div class="loading">
+                    🔄 Searching for "${query}" across all stores...
+                </div>
+            `;
+
+            try {
+                console.log(`🔍 Making request to: ${API_BASE_URL}/all-stores?q=${encodeURIComponent(query)}`);
+                const response = await fetch(`${API_BASE_URL}/all-stores?q=${encodeURIComponent(query)}`);
+
+                console.log('Response status:', response.status);
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+
+                const data = await response.json();
+                console.log('✅ Received data:', data);
+                displayResults(data);
+
+            } catch (error) {
+                console.error('Search error:', error);
+                resultsContainer.innerHTML = `
+                    <div class="error">
+                        ❌ Failed to fetch products<br><br>
+                        <strong>Error:</strong> ${error.message}<br><br>
+                        <div class="debug-info">
+                            API URL: ${API_BASE_URL}/all-stores<br>
+                            Query: ${query}
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function displayResults(data) {
+            const resultsContainer = document.getElementById('resultsContainer');
+            
+            if (!data.groupedProducts || data.groupedProducts.length === 0) {
+                resultsContainer.innerHTML = `
+                    <div class="error">
+                        ❌ No products found for "${data.query}". Try a different search term.
+                    </div>
+                `;
+                return;
+            }
+
+            let html = `
+                <div class="stats">
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value">${data.totalGroups}</div>
+                            <div class="stat-label">Product Groups</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${data.totalProducts}</div>
+                            <div class="stat-label">Total Products</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${data.groupedProducts.reduce((acc, group) => acc + group.stores.length, 0)}</div>
+                            <div class="stat-label">Store Listings</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${Object.keys(data.performance || {}).length}</div>
+                            <div class="stat-label">Stores Searched</div>
+                        </div>
+                    </div>
+                </div>
+
+                ${data.performance ? `
+                <div class="performance">
+                    <h3>⏱️ Performance</h3>
+                    <div class="performance-stats">
+                        ${Object.entries(data.performance).map(([store, time]) => `
+                            <div class="performance-item">
+                                <div><strong>${store}</strong></div>
+                                <div>${time}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+
+                <div class="groups-container">
+            `;
+
+            data.groupedProducts.forEach((group, index) => {
+                const bestPriceIndex = findBestPrice(group.stores);
+                
+                html += `
+                    <div class="product-group">
+                        <div class="group-header">
+                            <div class="group-info">
+                                <div class="group-name">${group.name}</div>
+                                ${group.productType ? `<div class="product-type">${group.productType}</div>` : ''}
+                            </div>
+                            ${group.image ? `<img src="${group.image}" alt="${group.name}" class="group-image" onerror="this.style.display='none'">` : ''}
+                        </div>
+                        
+                        <div class="stores-grid">
+                            ${group.stores.map((store, storeIndex) => `
+                                <div class="store-item ${store.store}">
+                                    ${store.image ? 
+                                        `<img src="${store.image}" alt="${store.store}" class="store-image" onerror="this.parentNode.querySelector('.no-image').style.display='flex'">` : 
+                                        ''
+                                    }
+                                    <div class="no-image" style="display: ${store.image ? 'none' : 'flex'}">
+                                        No Image
+                                    </div>
+                                    <div class="store-content">
+                                        <div class="store-header">
+                                            <div class="store-name">${store.store}</div>
+                                            <div class="store-price">
+                                                ${store.price || 'Price N/A'}
+                                                ${store.currency ? `<span class="store-currency">${store.currency}</span>` : ''}
+                                                ${storeIndex === bestPriceIndex && store.price ? '<span class="best-price">Best</span>' : ''}
+                                            </div>
+                                        </div>
+                                        ${store.rating ? `<div class="store-rating">⭐ ${store.rating}</div>` : ''}
+                                        ${store.url && store.url !== '#' ? 
+                                            `<a href="${store.url}" target="_blank" class="store-link">View Product →</a>` : ''}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+
+                        ${bestPriceIndex !== -1 && group.stores.length > 1 ? `
+                            <div class="price-comparison">
+                                💰 <strong>Best Price:</strong> ${group.stores[bestPriceIndex].price} ${group.stores[bestPriceIndex].currency} from ${group.stores[bestPriceIndex].store}
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            });
+
+            html += `</div>`;
+
+            // Add errors section if there are any
+            if (data.errors && Object.keys(data.errors).length > 0) {
+                html += `
+                    <div class="error" style="margin-top: 20px;">
+                        <h3>⚠️ Some stores had issues:</h3>
+                        ${Object.entries(data.errors).map(([store, error]) => `
+                            <div><strong>${store}:</strong> ${error}</div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
+            resultsContainer.innerHTML = html;
+        }
+
+        // Allow Enter key to trigger search
+        document.getElementById('searchInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                searchProducts();
+            }
+        });
+
+        // Auto-search on page load with "iphone" as default
+        window.addEventListener('load', function() {
+            const searchInput = document.getElementById('searchInput');
+            if (searchInput.value.trim()) {
+                setTimeout(() => {
+                    searchProducts();
+                }, 1000);
+            }
+        });
+    </script>
+</body>
+</html>

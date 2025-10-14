@@ -1,24 +1,29 @@
-import express from 'express';
-import mongoose from 'mongoose';
-import dotenv from 'dotenv';
+import express from "express";
+import connectDB from "./Db.js";
+import dotenv from "dotenv";
+import router from "./Router/routes.js";
+import cors from "cors";  // ✅ uncomment this
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 dotenv.config(); 
 
 const PORT = process.env.PORT || 5000;
-const MONGO_URI = process.env.MONGO_URI;
 const app = express();
 
-
+// ✅ Enable CORS for frontend URLs
+app.use(cors({
+  origin: "http://localhost:5173", // your Vite/React frontend
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  credentials: true
+}));
+connectDB();
 app.use(express.json());
-mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log('MongoDB connected'))
-    .catch(err => console.log(err));
-
-app.get('/', (req, res) => {
-    res.send('API is running...');
-});
+app.use("/api", router);
 
 app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+  console.log(`Server is running on port ${PORT}`);
 });
-
