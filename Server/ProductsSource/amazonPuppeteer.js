@@ -1,120 +1,183 @@
-import puppeteer from "puppeteer-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
-
-puppeteer.use(StealthPlugin());
+import { chromium } from "playwright";
+import { normalizeProduct } from "../Utils/productUtils.js";
+import { performance } from "perf_hooks";
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// 🎯 LENIENT FILTERING - Fixes spelling issues
+function filterRelevantProducts(products, query) {
+  if (!query || !products.length) return products;
+
+  const queryLower = query.toLowerCase();
+  const queryWords = queryLower.split(" ").filter(word => word.length > 2);
+
+  if (!queryWords.length) return products;
+
+  return products.filter((p) => {
+    const productName = (p.name || "").toLowerCase();
+    
+    // 🎯 LENIENT MATCHING - Handle spelling variations
+    let matches = 0;
+    
+    for (const word of queryWords) {
+      // Exact match
+      if (productName.includes(word)) {
+        matches++;
+        continue;
+      }
+      
+      // 🎯 HANDLE COMMON SPELLING MISTAKES
+      if (word === "vaccum" && productName.includes("vacuum")) {
+        matches++;
+        continue;
+      }
+      if (word === "vacuum" && productName.includes("vaccum")) {
+        matches++;
+        continue;
+      }
+      
+      // Partial word matching
+      for (const productWord of productName.split(/\s+/)) {
+        if (productWord.includes(word) || word.includes(productWord)) {
+          matches++;
+          break;
+        }
+      }
+    }
+    
+    // 🎯 LOWER THRESHOLD - Keep products that match at least one word
+    return matches >= 1;
+  });
+}
+
 export async function scrapeAmazon(searchTerm = "laptop") {
   console.log(`🚀 Scraping Amazon for "${searchTerm}"...`);
+  const start = performance.now();
 
-  const browser = await puppeteer.launch({
+  const browser = await chromium.launch({
     headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-web-security",
-      "--disable-features=IsolateOrigins,site-per-process",
-    ],
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
 
-  const page = await browser.newPage();
-  await page.setViewport({ width: 1366, height: 768 });
-  await page.setUserAgent(
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-  );
+  const page = await browser.newPage({
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+    viewport: { width: 1366, height: 768 },
+  });
+
+  // 🎯 LESS AGGRESSIVE BLOCKING - Allow more resources for Amazon
+  await page.route("**/*", (route) => {
+    const type = route.request().resourceType();
+    const url = route.request().url();
+    
+    // Only block heavy images and trackers
+    if (type === "image" && !url.includes("amazon.com/images")) {
+      route.abort();
+    } else if (url.includes("google-analytics") || url.includes("adsystem")) {
+      route.abort();
+    } else {
+      route.continue();
+    }
+  });
 
   try {
     const url = `https://www.amazon.com/s?k=${encodeURIComponent(searchTerm)}`;
     console.log(`🌍 Navigating to: ${url}`);
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120000 });
-    await delay(3000);
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 
-    // 🧠 Detect if Amazon is blocking with captcha
-    const title = await page.title();
-    const currentUrl = await page.url();
-    if (title.toLowerCase().includes("robot") || currentUrl.includes("captcha")) {
-      console.log("⚠️ Captcha detected. Screenshot saved as amazon-captcha.png");
-      await page.screenshot({ path: "amazon-captcha.png", fullPage: true });
-      return [];
+    // 🎯 BETTER WAITING FOR AMAZON
+    await page.waitForSelector('[data-component-type="s-search-result"]', { timeout: 10000 });
+    
+    // Scroll to load more products
+    for (let i = 0; i < 5; i++) {
+      await page.evaluate(() => window.scrollBy(0, 500));
+      await delay(500);
     }
 
-    // 🧭 Scroll down to load more results
-    await page.evaluate(async () => {
-      await new Promise((resolve) => {
-        let totalHeight = 0;
-        const distance = 300;
-        const timer = setInterval(() => {
-          window.scrollBy(0, distance);
-          totalHeight += distance;
-          if (totalHeight >= document.body.scrollHeight - window.innerHeight) {
-            clearInterval(timer);
-            resolve();
-          }
-        }, 200);
+    console.log("⏳ Extracting products...");
+
+    // 🎯 BETTER AMAZON SELECTORS
+    const products = await page.$$eval(
+      '[data-component-type="s-search-result"]',
+      (elements, searchTerm) => {
+        return elements
+          .map((el) => {
+            try {
+              const name =
+                el.querySelector("h2 a span")?.textContent?.trim() ||
+                el.querySelector("h2")?.textContent?.trim() ||
+                el.querySelector(".a-text-normal")?.textContent?.trim();
+              
+              const linkElement = el.querySelector("h2 a") || el.querySelector("a.a-link-normal");
+              const link = linkElement?.href;
+              
+              const image =
+                el.querySelector("img.s-image")?.src ||
+                el.querySelector("img")?.src;
+              
+              const priceText =
+                el.querySelector(".a-price .a-offscreen")?.textContent ||
+                el.querySelector(".a-price-whole")?.textContent ||
+                el.querySelector(".a-color-base")?.textContent ||
+                "0";
+              
+              const ratingText = el.querySelector(".a-icon-alt")?.textContent;
+              const rating = ratingText ? parseFloat(ratingText.split(" ")[0]) : null;
+
+              let price = null;
+              if (priceText && priceText !== "0") {
+                const match = priceText.replace(/[^\d.,]/g, "").match(/[\d.,]+/);
+                if (match) price = parseFloat(match[0].replace(/,/g, ""));
+              }
+
+              // 🎯 BETTER VALIDATION
+              if (name && price && price > 0 && image && link) {
+                return {
+                  name,
+                  price,
+                  currency: "USD", // Amazon is always USD
+                  image,
+                  url: link.startsWith("http") ? link : `https://amazon.com${link}`,
+                  rating,
+                  store: "Amazon",
+                };
+              }
+            } catch (e) {
+              // Silent fail for individual products
+            }
+            return null;
+          })
+          .filter(Boolean);
+      },
+      searchTerm
+    );
+
+    console.log(`📦 Raw Amazon results: ${products.length} products`);
+    
+    // 🎯 DEBUG: Show what Amazon found before filtering
+    if (products.length > 0) {
+      console.log("🔍 Amazon raw products (before filtering):");
+      products.slice(0, 5).forEach((p, i) => {
+        console.log(`   ${i+1}. ${p.name} - $${p.price}`);
       });
-    });
-    await delay(2000);
+    }
 
-    // 📦 Extract products
-    const products = await page.evaluate(() => {
-      const items = Array.from(
-        document.querySelectorAll('[data-component-type="s-search-result"]')
-      );
+    const normalized = products.map((p) => normalizeProduct(p));
 
-      return items.map((el) => {
-        const title =
-          el.querySelector("h2 a span")?.textContent?.trim() ||
-          el.querySelector("h2")?.textContent?.trim() ||
-          null;
+    // 🔍 LENIENT FILTERING
+    const filtered = filterRelevantProducts(normalized, searchTerm);
 
-        // ✅ Extract ASIN and build product URL
-        const asin = el.getAttribute("data-asin");
-        let url = asin ? `https://www.amazon.com/dp/${asin}` : null;
+    const duration = ((performance.now() - start) / 1000).toFixed(2);
+    console.log(`✅ Extracted ${filtered.length} relevant products in ${duration}s`);
 
-        if (!url) {
-          const linkEl = el.querySelector("h2 a, a.a-link-normal");
-          const href = linkEl?.getAttribute("href");
-          if (href) {
-            const asinMatch = href.match(/\/dp\/([A-Z0-9]{10})/);
-            if (asinMatch) url = `https://www.amazon.com/dp/${asinMatch[1]}`;
-            else if (href.startsWith("/"))
-              url = "https://www.amazon.com" + href.split("?")[0];
-          }
-        }
+    // 🎯 DEBUG: Show final results
+    if (filtered.length === 0 && products.length > 0) {
+      console.log("⚠️  All products were filtered out. Check filtering logic.");
+    }
 
-        // 🖼️ Image
-        const image =
-          el.querySelector("img.s-image")?.src ||
-          el.querySelector("img")?.getAttribute("src") ||
-          null;
-
-        // 💰 Extract price
-        let price = null;
-        const priceText =
-          el.querySelector(".a-price .a-offscreen")?.textContent?.trim() || "";
-        const priceMatch = priceText.match(/[\d,]+\.?\d*/);
-        if (priceMatch) price = parseFloat(priceMatch[0].replace(/,/g, ""));
-
-        // 💵 Currency detection
-        const currency = priceText.includes("KES") ? "KES" : "USD";
-
-        return {
-          name: title || "No title",
-          price,
-          currency,
-          image,
-          url: url || "No URL",
-        };
-      });
-    });
-
-    console.log(`✅ Extracted ${products.length} products from Amazon`);
-    return products.filter((p) => p.name && p.image && p.price);
-  } catch (error) {
-    console.error("❌ Amazon scraping error:", error.message);
-    await page.screenshot({ path: "amazon-error.png", fullPage: true });
+    return filtered;
+  } catch (err) {
+    console.error(`❌ Amazon scraper error: ${err.message}`);
     return [];
   } finally {
     await browser.close();
@@ -122,11 +185,14 @@ export async function scrapeAmazon(searchTerm = "laptop") {
   }
 }
 
-// ✅ For quick standalone testing
+// 🧪 Standalone test with debug
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const term = process.argv[2] || "laptop";
+  const term = process.argv[2] || "vacuum cleaner";
+  console.log(`🧪 Testing Amazon with: "${term}"`);
   scrapeAmazon(term).then((products) => {
-    console.log(`\n🎉 Found ${products.length} products:`);
-    console.log(products);
+    console.log(`\n🎉 Final: ${products.length} products:`);
+    products.forEach((p, i) => {
+      console.log(`${i+1}. ${p.name} - $${p.price}`);
+    });
   });
 }

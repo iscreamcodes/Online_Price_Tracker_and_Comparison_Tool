@@ -1,130 +1,132 @@
+// Controller/ProductsController.js
 import { fetchAllStoresProducts } from "../services/ProductService.js";
 import { saveMatchedProducts } from "../services/saveMatchedProducts.js";
-//import { saveProducts } from "./saveProducts.js";
+import { addHistoricalPriceIfChanged } from "../services/historyService.js";
+import Listings from "../Model/Listings.js";
+import Products from "../Model/Products.js";
+import HistoricalPrice from "../Model/History.js";
 
-/**
- * ✅ Fetch products from all stores (Jumia, eBay, Kilimall, Amazon)
- * Includes AI grouping for similar items.
- */
 export const getAllStoresProducts = async (req, res) => {
   const query = req.query.q || "laptop";
-  const sortBy = req.query.sortBy;
-  const minPrice = req.query.minPrice ? Number(req.query.minPrice) : null;
-  const maxPrice = req.query.maxPrice ? Number(req.query.maxPrice) : null;
-  const minRating = req.query.minRating ? Number(req.query.minRating) : null;
   const saveToDB = req.query.save === "true";
 
   console.log(`🔍 Searching all stores for: "${query}"`);
 
   try {
-    const result = await fetchAllStoresProducts({
-      query,
-      sortBy,
-      minPrice,
-      maxPrice,
-      minRating,
+    // 🟢 PHASE 1: Check for existing products in DB
+    let existingProducts = [];
+
+    if (query.trim()) {
+      const matchingProducts = await Products.find({
+        Product_Name: { $regex: query, $options: "i" },
+      });
+
+      console.log(`📚 Found ${matchingProducts.length} matching products in DB`);
+
+      if (matchingProducts.length > 0) {
+        const productIds = matchingProducts.map((p) => p._id);
+        existingProducts = await Listings.find({
+          Product_id: { $in: productIds },
+        })
+          .populate("Product_id")
+          .limit(20);
+
+        console.log(`📋 Found ${existingProducts.length} listings`);
+      }
+    } else {
+      existingProducts = await Listings.find()
+        .populate("Product_id")
+        .sort({ Listing_Last_Updated: -1 })
+        .limit(20);
+    }
+
+    // 🟢 PHASE 2: Run scrapers (now includes Masoko!)
+    let scrapedResults = { groupedProducts: [] };
+    let savedListings = [];
+
+    if (saveToDB) {
+      try {
+        scrapedResults = await fetchAllStoresProducts({ query });
+        console.log("🧭 Scraper performance:", scrapedResults.performance);
+
+        if (scrapedResults.groupedProducts?.length > 0) {
+          savedListings = await saveMatchedProducts(scrapedResults.groupedProducts);
+          console.log(`💾 Saved ${savedListings.length} NEW listings`);
+
+          // Save historical prices
+          for (const listing of savedListings) {
+            await addHistoricalPriceIfChanged({
+              Listing_id: listing._id,
+              History_Price: listing.Listing_Price,
+            });
+          }
+        }
+      } catch (scrapeErr) {
+        console.error("❌ Scraping failed:", scrapeErr.message);
+      }
+    }
+
+    // 🟢 PHASE 3: Combine existing and new listings
+    const allListings = [...existingProducts];
+    const newListingIds = new Set(savedListings.map((l) => l._id.toString()));
+
+    savedListings.forEach((newListing) => {
+      if (!allListings.some((existing) => existing._id.toString() === newListing._id.toString())) {
+        allListings.push(newListing);
+      }
     });
 
-    // Handle AI-matched grouped products
-    const allProducts = result.groupedProducts?.flatMap((g) => g.products) || [];
+    // 🧠 Clean & unified product structure for frontend
+    const productsWithNames = allListings.map((listing) => {
+      let productName =
+        listing.Product_id?.Product_Name ||
+        listing.Product_Name ||
+        listing.title ||
+        listing.name ||
+        "Unknown Product";
 
-   /* if (saveToDB && allProducts.length > 0) {
-      await saveProducts(allProducts);
-      console.log(`💾 Saved ${allProducts.length} products to DB`);
-    }*/
-   await saveMatchedProducts(result.groupedProducts);
+      // Try extracting name from URL if still unknown
+      if (productName === "Unknown Product" && listing.Listing_URL) {
+        const lastPart = listing.Listing_URL.split("/").pop();
+        if (lastPart && lastPart.length > 5) {
+          productName = decodeURIComponent(lastPart.replace(/-/g, " "));
+        }
+      }
 
+      return {
+        _id: listing._id,
+        name: productName,
+        price: listing.Listing_Price,
+        currency: listing.Listing_Currency,
+        store: listing.Listing_Store_Name,
+        image:
+          listing.Listing_Image_URL ||
+          listing.Product_id?.Product_Image_URL ||
+          "/placeholder-image.jpg",
+        url: listing.Listing_URL,
+        isNew: newListingIds.has(listing._id.toString()),
+        lastUpdated: listing.Listing_Last_Updated,
+      };
+    });
+
+    console.log(`🎯 Sending ${productsWithNames.length} products to frontend`);
+
+    // ✅ Final Response
     res.json({
-      message: "✅ Products fetched and matched successfully across stores",
+      message: "✅ Products fetched successfully",
       query,
-      totalProducts: result.totalProducts,
-      groupedProducts: result.groupedProducts,
-      performance: result.performance,
-      errors: result.errors,
-     // savedToDB,
-     // savedCount: saveToDB ? allProducts.length : 0,
+      products: productsWithNames,
+      performance: scrapedResults.performance || {},
+      errors: scrapedResults.errors || {},
+      scrapingCompleted: !!scrapedResults.groupedProducts,
+      totalFromDB: existingProducts.length,
+      totalNew: savedListings.length,
     });
   } catch (err) {
-    console.error("❌ Error fetching or saving products:", err);
+    console.error("❌ Error in getAllStoresProducts:", err);
     res.status(500).json({
       error: "Unexpected server error",
       details: err.message,
     });
-  }
-};
-
-/**
- * ✅ Fetch products from Kilimall only
- */
-export const getKilimallProducts = async (req, res) => {
-  const query = req.query.q || "laptop";
-  console.log(`🛍️ Searching Kilimall for: "${query}"`);
-
-  try {
-    const result = await fetchAllStoresProducts({ query, stores: ["kilimall"] });
-    res.json({
-      message: "✅ Products fetched successfully (Kilimall only)",
-      ...result,
-    });
-  } catch (err) {
-    console.error("❌ Error fetching Kilimall products:", err);
-    res.status(500).json({ error: "Unexpected server error", details: err.message });
-  }
-};
-
-/**
- * ✅ Fetch products from Jumia only
- */
-export const getJumiaProducts = async (req, res) => {
-  const query = req.query.q || "laptop";
-  console.log(`🛍️ Searching Jumia for: "${query}"`);
-
-  try {
-    const result = await fetchAllStoresProducts({ query, stores: ["jumia"] });
-    res.json({
-      message: "✅ Products fetched successfully (Jumia only)",
-      ...result,
-    });
-  } catch (err) {
-    console.error("❌ Error fetching Jumia products:", err);
-    res.status(500).json({ error: "Unexpected server error", details: err.message });
-  }
-};
-
-/**
- * ✅ Fetch products from Amazon only
- */
-export const getAmazonProducts = async (req, res) => {
-  const query = req.query.q || "laptop";
-  console.log(`🛒 Searching Amazon for: "${query}"`);
-
-  try {
-    const result = await fetchAllStoresProducts({ query, stores: ["amazon"] });
-    res.json({
-      message: "✅ Products fetched successfully (Amazon only)",
-      ...result,
-    });
-  } catch (err) {
-    console.error("❌ Error fetching Amazon products:", err);
-    res.status(500).json({ error: "Unexpected server error", details: err.message });
-  }
-};
-
-/**
- * ✅ Fetch products from eBay only
- */
-export const getEbayProducts = async (req, res) => {
-  const query = req.query.q || "laptop";
-  console.log(`💻 Searching eBay for: "${query}"`);
-
-  try {
-    const result = await fetchAllStoresProducts({ query, stores: ["ebay"] });
-    res.json({
-      message: "✅ Products fetched successfully (eBay only)",
-      ...result,
-    });
-  } catch (err) {
-    console.error("❌ Error fetching eBay products:", err);
-    res.status(500).json({ error: "Unexpected server error", details: err.message });
   }
 };

@@ -1,125 +1,104 @@
-import { fetchEbayProducts } from "../ProductsSource/ebayApi.js";
+// Server/services/ProductsService.js
+import pLimit from "p-limit";
 import { fetchJumiaProducts } from "../ProductsSource/jumiaPuppeteer.js";
 import { fetchKilimallProducts } from "../ProductsSource/kilimallPuppeteer.js";
 import { scrapeAmazon } from "../ProductsSource/amazonPuppeteer.js";
+import { safeScrapeMasoko as scrapeMasoko } from "../ProductsSource/safeMasoko.js";
+import { fetchJijiProducts } from "../ProductsSource/jijiPuppeteer.js";
 import { normalizeProduct } from "../Utils/productUtils.js";
-import pLimit from "p-limit";
-import { spawn } from "child_process";
 
-const limit = pLimit(2);
+// 🧩 Limit concurrency (avoid browser overload)
+const CONCURRENCY = 3;
+const limit = pLimit(CONCURRENCY);
 
-// Helper to run scrapers with timeouts
-const withTimeout = (promise, timeoutMs, storeName) =>
-  Promise.race([
-    promise,
-    new Promise((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`${storeName} timeout after ${timeoutMs}ms`)),
-        timeoutMs
-      )
-    ),
-  ]);
+/** 🧠 Helper: sanitize and extract query string */
+function getQueryString(queryOrObj) {
+  if (!queryOrObj) return "";
+  if (typeof queryOrObj === "string") return queryOrObj.trim();
+  if (typeof queryOrObj === "object") {
+    const possibleKeys = ["q", "query", "search"];
+    for (const key of possibleKeys) {
+      const value = queryOrObj[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+  }
+  try {
+    const str = String(queryOrObj);
+    return str !== "[object Object]" ? str : "";
+  } catch {
+    return "";
+  }
+}
 
-// ✅ Python AI Matcher – batch comparison
-const runAIMatcher = (products) => {
-  return new Promise((resolve, reject) => {
-    const py = spawn("python", [
-      "D:/Desktop/Project_Implementation/Online_Price_Tracker_and_Comparison_Tool/Server/Ai/ai_matcher.py",
-      JSON.stringify(products),
-    ]);
+/** 🚀 Main multi-store aggregator for API (no timeout) */
+export async function fetchAllStoresProducts({ query, stores } = {}) {
+  const q = getQueryString(query);
+  if (!q) throw new Error("❌ Missing search query");
 
-    let output = "";
-    let errorOutput = "";
+  console.log(`\n🚀 Starting scraping for: "${q}"\n`);
 
-    py.stdout.on("data", (data) => (output += data.toString()));
-    py.stderr.on("data", (err) => (errorOutput += err.toString()));
-
-    py.on("close", (code) => {
-      if (errorOutput) console.error("AI Error:", errorOutput);
-      try {
-        const result = JSON.parse(output || "[]");
-        resolve(result);
-      } catch (err) {
-        reject(new Error("Failed to parse AI output: " + err.message));
-      }
-    });
-  });
-};
-
-// ✅ Main service: scrape + match
-export const fetchAllStoresProducts = async ({ query, stores }) => {
-  const results = {};
-  const errors = {};
-  const performance = {};
-
-  const scrapeSources = {
-    jumia: { fn: fetchJumiaProducts, timeout: 120000 },
-    ebay: { fn: fetchEbayProducts, timeout: 30000 },
-    kilimall: { fn: fetchKilimallProducts, timeout: 60000 },
-    amazon: { fn: scrapeAmazon, timeout: 120000 },
+  // 🏪 Active scrapers
+  const allScrapers = {
+    jumia: fetchJumiaProducts,
+    kilimall: fetchKilimallProducts,
+    amazon: scrapeAmazon,
+   // masoko: scrapeMasoko,
+    jiji: fetchJijiProducts,
   };
 
-  // Select stores to scrape
-  const selectedSources =
-    stores && stores.length
-      ? stores.map((name) => ({ name, ...scrapeSources[name] }))
-      : Object.entries(scrapeSources).map(([name, cfg]) => ({
-          name,
-          ...cfg,
-        }));
+  const activeScrapers = stores?.length
+    ? Object.fromEntries(Object.entries(allScrapers).filter(([k]) => stores.includes(k)))
+    : allScrapers;
 
-  // Run scrapers in parallel (2 at a time)
-  await Promise.allSettled(
-    selectedSources.map(({ name, fn, timeout }) =>
-      limit(async () => {
-        const start = Date.now();
-        try {
-          const data = await withTimeout(fn(query), timeout, name);
-          const end = Date.now();
-          performance[name] = `${end - start}ms`;
+  const normalizedPerStore = {};
+  const performance = {};
+  const errors = {};
 
-          results[name] = data?.length
-            ? data.map((p) => normalizeProduct(p, name))
-            : [];
-          if (!data?.length) errors[name] = "No products found";
-        } catch (err) {
-          const end = Date.now();
-          performance[name] = `${end - start}ms`;
-          errors[name] = err.message;
-          results[name] = [];
-        }
-      })
-    )
+  // ⚙️ Run scrapers with concurrency
+  const tasks = Object.entries(activeScrapers).map(([store, fn]) =>
+    limit(async () => {
+      const start = Date.now();
+      try {
+        const products = await fn(q);
+
+        // Log each product individually
+        products.forEach((p, idx) =>
+          console.log(`[${store}] Product ${idx + 1}: ${p.name || p.title || "Unnamed"} - ${p.price || "N/A"}${p.currency ? " " + p.currency : ""}`)
+        );
+
+        normalizedPerStore[store] = products.map((p) => normalizeProduct(p, store));
+        const duration = Date.now() - start;
+        performance[store] = `${duration}ms`;
+      } catch (err) {
+        errors[store] = err.message || String(err);
+        normalizedPerStore[store] = [];
+        const duration = Date.now() - start;
+        performance[store] = `${duration}ms`;
+        console.error(`❌ Error scraping ${store}: ${err.message || err}`);
+      }
+    })
   );
 
-  // Merge all results
-  const allProducts = Object.values(results).flat();
-  if (!allProducts.length) {
-    return {
-      query,
-      totalProducts: 0,
-      groupedProducts: [],
-      performance,
-      errors,
-    };
-  }
+  await Promise.all(tasks);
 
-  console.log(`🧠 Sending ${allProducts.length} products to AI matcher...`);
+  // 📦 Flatten products
+  const allProducts = Object.values(normalizedPerStore).flat();
 
-  // ✅ Run single AI batch matcher
-  let groupedProducts = [];
-  try {
-    groupedProducts = await runAIMatcher(allProducts);
-    console.log(`🤖 AI matched ${groupedProducts.length} product groups`);
-  } catch (err) {
-    console.error("AI Matching failed:", err.message);
-  }
+  // Log summary for debugging
+  console.log("\n📊 Scraping Summary:");
+  Object.entries(normalizedPerStore).forEach(([store, products]) => {
+    console.log(`   ⏱️ ${store}: ${performance[store]} (${products.length} items)`);
+  });
+  if (Object.keys(errors).length) console.warn("⚠️ Scraper errors:", errors);
+
+  // 🧠 Basic identity grouping
+  const groupedProducts = allProducts.map((p) => ({ baseProduct: p, products: [p] }));
 
   return {
-    query,
+    query: q,
     totalProducts: allProducts.length,
     groupedProducts,
     performance,
     errors: Object.keys(errors).length ? errors : undefined,
   };
-};
+}
