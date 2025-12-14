@@ -1,44 +1,32 @@
+// Router/routes.js
 import express from "express";
-import { getAllStoresProducts } from "../Controller/ProductsController.js";
-//import { getKilimallProducts, getJumiaProducts, getAmazonProducts } from "../Controller/ProductsController.js";
-import Products from "../Model/Products.js";
-import AuthRoutes from "./AuthRoutes.js";
-import HistoryRoutes from "./HistoryRoutes.js";
-import { trackListing } from "../Controller/UserController.js";
-import savedListingsRoutes from "./savedListingRoutes.js"; 
-import AdminRoutes from "./AdminRoutes.js";
-
-
+import productRoutes from "./ProductRoutes.js";
+import savedListingsRoutes from "./SavedListingRoutes.js";
+import authRoutes from "./AuthRoutes.js";
+import historyRoutes from "./HistoryRoutes.js";
+import adminRoutes from "./AdminRoutes.js";
+import userRoutes from "./UserRoutes.js";
+import reportRoutes from "./ReportRoutes.js";
 const router = express.Router();
 
-router.get("/all-stores", getAllStoresProducts);
-//router.get("/kilimall", getKilimallProducts);
-//router.get("/jumia", getJumiaProducts);
-//router.get("/amazon", getAmazonProducts);
+// ✅ Mount all routes
+router.use("/products", productRoutes);
+router.use("/saved-listings", savedListingsRoutes);
+router.use("/auth", authRoutes);
+router.use("/history", historyRoutes);
+router.use("/admin", adminRoutes);
+router.use("/users", userRoutes);
+router.use("/reports", reportRoutes);
 
 
-router.post("/track-product", trackListing);
-
-
-router.get("/test", async (req, res) => {
-    console.log("✅ /test route was hit");
-    try {
-      const productCount = await Products.countDocuments(); // test DB query
-      res.json({ 
-        message: "Server and DB are working fine ✅",
-        totalProducts: productCount
-      });
-    } catch (err) {
-      console.error("Error in /test route:", err.message);
-      res.status(500).json({ error: "Database not reachable ❌" });
-    }
+// ✅ Test route - this should work at /api/test
+router.get("/test", (req, res) => {
+  console.log("✅ /api/test route hit");
+  res.json({ 
+    message: "API is working!",
+    timestamp: new Date().toISOString(),
+    status: "success"
   });
-
-  router.use("/", savedListingsRoutes);
-
-  router.use("/auth", AuthRoutes); 
-  router.use("/history", HistoryRoutes);
- 
-  router.use("/admin", AdminRoutes); // now GET /api/admin/users works
+});
 
 export default router;

@@ -1,31 +1,27 @@
-// tester.js
-import chalk from "chalk";
-import { fetchEbayProducts } from "./ebayApi.js";
+import dotenv from "dotenv";
+dotenv.config({path: "../.env"});
+import nodemailer from "nodemailer";
 
-async function testEbay() {
-  const query = "MacBook"; // 🧠 change this to anything you want
-  console.log(chalk.cyanBright(`\n🔍 Searching eBay for "${query}"...\n`));
+async function testEmail() {
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+  });
 
   try {
-    const products = await fetchEbayProducts(query);
-
-    if (!products.length) {
-      console.log(chalk.yellow("⚠️ No products found — maybe try a broader keyword."));
-      return;
-    }
-
-    console.log(chalk.greenBright(`✅ Found ${products.length} products:\n`));
-
-    products.slice(0, 5).forEach((p, i) => {
-      console.log(chalk.magenta.bold(`${i + 1}. ${p.name}`));
-      console.log(chalk.green(`   💲 Price: ${p.price} ${p.currency || ""}`));
-      console.log(chalk.blue(`   🏬 Store: ${p.store}`));
-      console.log(chalk.gray(`   🔗 URL: ${p.url}`));
-      console.log(chalk.dim(`   🖼️  Image: ${p.image}\n`));
+    await transporter.sendMail({
+      from: `"Price Tracker" <${process.env.EMAIL_USER}>`,
+      to: "your-other-email@gmail.com",
+      subject: "Test Email",
+      text: "This is a test email from Price Tracker.",
     });
-  } catch (error) {
-    console.error(chalk.red("❌ Test failed:"), error.message);
+    console.log("✅ Test email sent!");
+  } catch (err) {
+    console.error("❌ Email error:", err.message);
   }
 }
 
-testEbay();
+testEmail();

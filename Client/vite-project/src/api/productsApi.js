@@ -1,27 +1,32 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: "http://localhost:5000/api",
+  baseURL: "http://localhost:5000/api/products",
   withCredentials: false,
 });
 
-export async function fetchAllProducts(query = "iphone") {
+// api/productsApi.js
+export async function fetchAllProducts(query = "laptop") {
   try {
-    const res = await api.get(`/all-stores?q=${query}&save=true`);
-    console.log("🧩 Backend response:", res.data);
+    console.log(`🟡 Fetching products for: "${query}"`);
+    
+    const res = await api.get(`/all-stores?q=${encodeURIComponent(query)}&save=true`);
+    console.log("🧩 Backend response structure:", {
+      hasProducts: !!res.data.products,
+      productsCount: res.data.products?.length,
+      totalFromDB: res.data.totalFromDB,
+      totalNew: res.data.totalNew,
+      message: res.data.message
+    });
 
-    // If backend returns groupedProducts
-    const products = Array.isArray(res.data.groupedProducts)
-    ? res.data.groupedProducts.flatMap((g) => g.products || [])
-    : res.data.products || [];
-  
-
-    return products;
+    // Return the entire response or just products
+    return res.data.products || [];
   } catch (err) {
     console.error("❌ Failed to fetch products:", err.response?.data || err.message);
     return [];
   }
 }
+
 
 // src/api/productsApi.js - Add this function
 // api/productsApi.js - UPDATE fetchSavedListings

@@ -1,4 +1,3 @@
-// kilimallApi.js - UPDATED with correct search endpoints
 import axios from "axios";
 import { normalizeProduct } from "../Utils/productUtils.js";
 
@@ -19,7 +18,7 @@ export async function fetchKilimallProducts(searchQuery) {
     }
     
     const relevant = filterRelevantProducts(products, searchQuery);
-    const normalized = relevant.map(p => normalizeProduct(p, "kilimall"));
+    const normalized = relevant.map(p => normalizeProduct(p, "Kilimall"));
     
     const endTime = Date.now();
     const duration = endTime - startTime;
@@ -132,19 +131,35 @@ function parseHtmlResponse(html, searchQuery) {
 }
 
 /**
- * Create product object from various data formats
+ * Create product object in format that normalizeProduct expects
  */
 function createProductObject(item, searchQuery) {
   return {
+    // Product schema fields (for normalizeProduct)
+    Product_Name: item.title || item.name || item.goods_name || searchQuery,
+    Product_Category: "Electronics", // Default category
+    Product_Category_code: "CAT_ELECTRONICS",
+    Product_Image_URL: item.image || item.goods_image || item.image_url || "",
+    
+    // Listing schema fields
+    Listing_Price: item.minPrice || item.price || item.sale_price || item.minPrice || 0,
+    Listing_Currency: "KES",
+    Listing_Store_Name: "Kilimall",
+    Listing_URL: item.url || `https://www.kilimall.co.ke/item/${item.listingId || item.id}.html`,
+    Listing_Image_URL: item.image || item.goods_image || item.image_url || "",
+    
+    // Additional fields
+    rating: item.reviewStar || item.rating || 0,
+    
+    // Keep original fields for compatibility
     name: item.title || item.name || item.goods_name || searchQuery,
     price: item.minPrice || item.price || item.sale_price || item.minPrice || 0,
-    originalPrice: item.maxListPrice || item.original_price || item.regular_price || 0,
-    image: item.image || item.goods_image || item.image_url || "",
-    url: item.url || `https://www.kilimall.co.ke/item/${item.listingId || item.id}.html`,
-    store: "Kilimall",
     currency: "KES",
+    store: "Kilimall",
+    url: item.url || `https://www.kilimall.co.ke/item/${item.listingId || item.id}.html`,
+    image: item.image || item.goods_image || item.image_url || "",
     reviews: item.reviews || 0,
-    rating: item.reviewStar || item.rating || 0
+    originalPrice: item.maxListPrice || item.original_price || item.regular_price || 0
   };
 }
 
@@ -267,7 +282,7 @@ function filterRelevantProducts(products, searchTerm, options = {}) {
   
     const relevant = products
       .map(p => {
-        const name = (p.name || "").toLowerCase();
+        const name = (p.Product_Name || "").toLowerCase(); // Use Product_Name instead of name
         let score = 0;
   
         if (!name.match(/[a-z]/)) return null;
@@ -301,14 +316,12 @@ function filterRelevantProducts(products, searchTerm, options = {}) {
     console.log(`✅ Kept ${relevant.length} relevant products after filtering`);
     return relevant;
   }
-  
-  
 
 /**
- * Test function with correct endpoints
+ * Test function with correct field names
  */
 export async function testKilimallAPI() {
-  console.log("🚀 Testing Kilimall API with correct endpoints...\n");
+  console.log("🚀 Testing Kilimall API with normalized products...\n");
   
   const testQueries = ["samsung phone", "laptop", "infinix hot 30", "tecno"];
   let totalDuration = 0;
@@ -327,8 +340,9 @@ export async function testKilimallAPI() {
     
     if (products.length > 0) {
       products.slice(0, 3).forEach((p, i) => {
-        console.log(`   ${i + 1}. ${p.name}`);
-        console.log(`      💰 KES ${p.price} | ⭐ ${p.rating || 'N/A'} | 📝 ${p.reviews || '0'} reviews`);
+        console.log(`   ${i + 1}. ${p.Product_Name}`);
+        console.log(`      💰 KES ${p.Listing_Price} | ⭐ ${p.rating || 'N/A'} | 🏪 ${p.Listing_Store_Name}`);
+        console.log(`      🔗 ${p.Listing_URL}`);
       });
     } else {
       console.log("   ❌ No relevant products found");
@@ -343,7 +357,34 @@ export async function testKilimallAPI() {
   console.log(`   Average products per query: ${(totalProducts / testQueries.length).toFixed(1)}`);
 }
 
+// Create a simple tester
+export async function testKilimallSimple(searchTerm = "laptop") {
+  console.log(`🔍 Testing Kilimall with: "${searchTerm}"\n`);
+  
+  try {
+    const products = await fetchKilimallProducts(searchTerm);
+    
+    if (products.length === 0) {
+      console.log("❌ No products found");
+      return;
+    }
+    
+    console.log(`📦 Found ${products.length} products:\n`);
+    
+    products.forEach((product, index) => {
+      console.log(`${index + 1}. ${product.Product_Name}`);
+      console.log(`   💰 KES ${product.Listing_Price} | ⭐ ${product.rating || 'No rating'} | 🏪 ${product.Listing_Store_Name}`);
+      console.log(`   🔗 ${product.Listing_URL}`);
+      console.log();
+    });
+    
+  } catch (error) {
+    console.log(`❌ Error: ${error.message}`);
+  }
+}
+
 // Run if executed directly
 if (import.meta.url === `file://${process.argv[1]}`) {
-  testKilimallAPI().catch(console.error);
+  const searchTerm = process.argv[2] || "laptop";
+  testKilimallSimple(searchTerm).catch(console.error);
 }

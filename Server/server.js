@@ -1,30 +1,47 @@
 import express from "express";
-import connectDB from "./Db.js";
 import dotenv from "dotenv";
+import connectDB from "./Db.js";
+import cors from "cors";
 import router from "./Router/routes.js";
-import cors from "cors";  // ✅ uncomment this
-import path from "path";
-import { fileURLToPath } from "url";
 
+dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-dotenv.config(); 
-
-const PORT = process.env.PORT || 5000;
 const app = express();
+const PORT = process.env.PORT || 5000;
 
-// ✅ Enable CORS for frontend URLs
-app.use(cors({
-  origin: "http://localhost:5173", // your Vite/React frontend
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true
-}));
 connectDB();
+
+app.use(cors({ origin: "http://localhost:5173", credentials: true }));
 app.use(express.json());
+
+// ✅ Debug middleware
+app.use((req, res, next) => {
+  console.log(`📨 ${new Date().toISOString()} - ${req.method} ${req.originalUrl}`);
+  next();
+});
+
+// All API routes are prefixed with /api
 app.use("/api", router);
 
+// Minimal ping route to test server
+app.get("/ping", (req, res) => {
+  console.log("✅ /ping route hit");
+  res.json({ message: "pong", status: "success" });
+});
+
+// ✅ FIXED: Catch-all for undefined routes
+app.use((req, res) => {
+  console.log(`❌ Route not found: ${req.originalUrl}`);
+  res.status(404).json({ 
+    error: "Route not found",
+    path: req.originalUrl,
+    method: req.method,
+    message: "Check the API endpoint and try again"
+  });
+});
+
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🔗 Test server: http://localhost:${PORT}/ping`);
+  console.log(`🔗 Test API: http://localhost:${PORT}/api/test`);
 });

@@ -14,3 +14,26 @@ The React Compiler is not enabled on this template because of its impact on dev 
 ## Expanding the ESLint configuration
 
 If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+
+
+
+
+
+
+  {/* Recent Activity */}
+       <section className="mt-12">
+          <Card className="shadow-lg rounded-2xl border-0">
+            <CardContent className="p-8">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-2xl font-bold text-gray-800">Recent Activity</h3>
+                <Link 
+                  to="/admin/activity" 
+                  className="text-blue-600 hover:text-blue-700 font-semibold text-sm"
+                >
+                  View All Activity →
+                </Link>
+              </div>
+              <ActivityLog limit={5} />
+            </CardContent>
+          </Card>
+        </section>

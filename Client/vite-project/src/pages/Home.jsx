@@ -3,8 +3,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import ProductCard from "../components/ProductCard";
 import { fetchAllProducts } from "../api/productsApi";
-import Navbar from "../components/Navbar";
-import { useAuth } from "../api/useAuth";
+import { useAuth } from "../api/AuthProvider";
 
 export default function Home() {
   const [products, setProducts] = useState([]);
@@ -13,8 +12,12 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const { user } = useAuth();
 
-  // Remove the useEffect that loads saved search from localStorage
-  // This prevents auto-searching on page load
+  // Use the same logic as Profile component
+  const nestedUser = user?.user || user;
+  
+  // Debug: log the user object to see the actual structure
+  console.log("Home user object:", user);
+  console.log("Home nestedUser:", nestedUser);
 
   useEffect(() => {
     if (!query.trim()) return;
@@ -23,11 +26,14 @@ export default function Home() {
       setLoading(true);
       try {
         const apiData = await fetchAllProducts(query);
+        console.log("🔄 Raw API response:", apiData); // Debug log
+        
         const data = transformProducts(apiData);
+        console.log("🔄 Transformed products:", data); // Debug log
+        
         setProducts(data);
         
-        // Optional: Save to localStorage only if you want to persist during session
-        // But don't auto-load on refresh
+        // Save to localStorage for session persistence
         localStorage.setItem('lastSearchQuery', query);
         localStorage.setItem('lastSearchResults', JSON.stringify(data));
       } catch (error) {
@@ -41,77 +47,68 @@ export default function Home() {
     loadProducts();
   }, [query]);
 
-  const transformProducts = (data) => {
-    if (!data) return [];
+  const transformProducts = (apiData) => {
+    if (!apiData) return [];
+    
+    console.log("🔄 Transforming API data:", apiData); // Debug log
 
-    // Helper: clean and fix Jumia URLs
-    const optimizeJumiaImageUrl = (url, store) => {
-      if (!url || url === '/placeholder-image.jpg') {
-        return '/placeholder-image.jpg';
-      }
+    // 🎯 FIX: Handle the actual backend response structure
+    // Backend sends { products: array, message, query, totalFromDB, totalNew }
+    const productsArray = apiData.products || apiData || [];
+    
+    if (!Array.isArray(productsArray)) {
+      console.error("❌ Expected array but got:", typeof productsArray);
+      return [];
+    }
 
-      if (store?.toLowerCase().includes('jumia')) {
-        if (url.startsWith('//')) {
-          url = 'https:' + url;
-        } else if (!url.startsWith('http')) {
-          url = `https://ke.jumia.is${url.startsWith('/') ? '' : '/'}${url}`;
-        }
-
-        if (url.includes('jumia.is/unsafe')) {
-          url = url.split('?')[0];
-          return url;
-        }
-
-        const match = url.match(/product\/[\d/]+\.jpg/);
-        if (match) {
-          return `https://ke.jumia.is/unsafe/fit-in/500x500/filters:fill(white)/${match[0]}`;
-        }
-      }
-
-      return url;
-    };
-
-    // Helper: extract the best available image
-    const extractImage = (product) => {
-      const imageUrl = product?.["data-src"] ||
-        product?.src ||
-        product?.image ||
-        product?.img ||
-        product?.thumbnail ||
-        "/placeholder-image.jpg";
+    return productsArray.map((product, index) => {
+      // 🎯 FIX: Use the actual field names from backend
+      const transformedProduct = {
+        _id: product._id || product.id || `product-${index}-${Date.now()}`,
+        name: product.name || product.title || "Unknown Product",
+        price: product.price || product.Listing_Price || 0,
+        currency: product.currency || product.Listing_Currency || "KES",
+        store: product.store || product.Listing_Store_Name || "Unknown Store",
+        image: optimizeImageUrl(product.image || product.Listing_Image_URL, product.store),
+        url: product.url || product.Listing_URL || "#",
+        lastUpdated: product.lastUpdated || product.Listing_Last_Updated,
+        productId: product.productId || null
+      };
       
-      return optimizeJumiaImageUrl(imageUrl, product?.store);
-    };
+      console.log(`🔄 Transformed product ${index}:`, transformedProduct.name); // Debug log
+      return transformedProduct;
+    }).filter(product => 
+      product.name && 
+      product.name !== "Unknown Product" && 
+      product.price > 0
+    );
+  };
 
-    // Handle grouped products
-    if (data.groupedProducts) {
-      return (data.groupedProducts || []).flatMap((group) =>
-        (group.products || []).map((product) => ({
-          _id: product?.id || product?._id || Math.random().toString(),
-          name: product?.title || product?.name || 'Unknown Product',
-          price: product?.price || 0,
-          currency: product?.currency || "USD",
-          store: product?.store || "Unknown Store",
-          image: extractImage(product),
-          url: product?.url || "#",
-        }))
-      );
+  // 🎯 SIMPLIFIED image optimization
+  const optimizeImageUrl = (url, store) => {
+    if (!url || url === '/placeholder.jpg' || url === '/placeholder-image.jpg') {
+      return '/placeholder-image.jpg';
     }
 
-    // Handle flat array
-    if (Array.isArray(data)) {
-      return data.map((product) => ({
-        _id: product?.id || product?._id || Math.random().toString(),
-        name: product?.title || product?.name || 'Unknown Product',
-        price: product?.price || 0,
-        currency: product?.currency || "USD",
-        store: product?.store || "Unknown Store",
-        image: extractImage(product),
-        url: product?.url || "#",
-      }));
+    // Handle Jumia images
+    if (store?.toLowerCase().includes('jumia')) {
+      if (url.startsWith('//')) {
+        url = 'https:' + url;
+      } else if (!url.startsWith('http')) {
+        url = `https://ke.jumia.is${url.startsWith('/') ? '' : '/'}${url}`;
+      }
+      
+      // Basic Jumia image optimization
+      if (url.includes('jumia.is') && !url.includes('/unsafe/')) {
+        // Try to create a optimized version
+        const filenameMatch = url.match(/\/([^/]+\.(jpg|jpeg|png|webp))$/i);
+        if (filenameMatch) {
+          return `https://ke.jumia.is/unsafe/fit-in/500x500/filters:fill(white)/${filenameMatch[1]}`;
+        }
+      }
     }
 
-    return [];
+    return url;
   };
 
   const handleSearch = () => {
@@ -124,7 +121,11 @@ export default function Home() {
     if (e.key === "Enter") handleSearch();
   };
 
-  // Remove clearSearch function since we're removing the clear button
+  // Get user display name - consistent with Profile component
+  const getDisplayName = () => {
+    if (!nestedUser) return "User";
+    return nestedUser?.User_name || nestedUser?.name || "User";
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50/70 to-white text-[#004d40] font-poppins relative overflow-hidden">
@@ -136,8 +137,6 @@ export default function Home() {
           className="w-full h-full object-cover opacity-70"
         />
       </div>
-
-      <Navbar />
 
       <div className="relative p-6 flex flex-col items-center">
         {/* Hero Section */}
@@ -166,7 +165,7 @@ export default function Home() {
           {user ? (
             <>
               <p className="text-green-700 font-semibold text-lg">
-                Welcome back, {user.user?.User_name}!
+                Welcome back, {getDisplayName()}!
               </p>
               <p className="text-gray-600">Ready to track and save?</p>
             </>
@@ -190,34 +189,38 @@ export default function Home() {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Enter product name..."
+              placeholder="Search for laptops, phones, electronics..."
               className="w-full bg-white/80 backdrop-blur-lg border border-green-300 rounded-2xl px-6 py-4 text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600 text-lg shadow-sm"
             />
             <button
               onClick={handleSearch}
-              className="absolute right-3 top-2.5 bg-[#004d40] hover:bg-green-900 text-white px-6 py-2 rounded-xl transition-all shadow-md"
+              disabled={loading}
+              className="absolute right-3 top-2.5 bg-[#004d40] hover:bg-green-900 text-white px-6 py-2 rounded-xl transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Search
+              {loading ? "Searching..." : "Search"}
             </button>
-            
-            {/* Removed the clear button entirely */}
           </div>
         </motion.div>
 
         {/* Loading State */}
         {loading && (
-          <p className="text-center text-gray-500 text-lg animate-pulse">
-            🔍 Searching for <span className="font-semibold text-[#004d40]">{query}</span>...
-          </p>
+          <div className="text-center mb-8">
+            <p className="text-gray-500 text-lg animate-pulse mb-2">
+              🔍 Searching for <span className="font-semibold text-[#004d40]">{query}</span>...
+            </p>
+            <p className="text-sm text-gray-400">
+              Scanning Jumia, Kilimall, Amazon, and Jiji...
+            </p>
+          </div>
         )}
 
         {/* Products Section */}
-        {!loading && products && products.length > 0 ? (
+        {!loading && products.length > 0 && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.8 }}
-            className="w-full"
+            className="w-full max-w-7xl"
           >
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-[#004d40]">
@@ -227,28 +230,44 @@ export default function Home() {
                 {products.length} products found
               </span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
               {products.map((product, i) => (
-                <ProductCard key={product._id || i} product={product} />
+                <ProductCard key={product._id} product={product} />
               ))}
             </div>
           </motion.div>
-        ) : (
-          !loading &&
-          query && (
-            <p className="text-center text-gray-400 mt-10 text-lg">
-              No products found for "{query}". Try another search term.
-            </p>
-          )
         )}
 
-        {!loading && !query && (!products || products.length === 0) && (
-          <div className="text-center mt-12 text-gray-600">
-            <p className="text-lg mb-3">Find the best deals across stores </p>
-            <p className="text-gray-500">
-              Search for any product to see prices from multiple stores.
+        {/* No Results */}
+        {!loading && query && products.length === 0 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-center mt-12 bg-white/60 backdrop-blur-md p-8 rounded-2xl shadow-sm border border-white/40"
+          >
+            <p className="text-xl text-gray-600 mb-2">
+              No products found for "{query}"
             </p>
-          </div>
+            <p className="text-gray-500">
+              Try searching for different terms like "laptop", "phone", or "electronics"
+            </p>
+          </motion.div>
+        )}
+
+        {/* Initial State */}
+        {!loading && !query && products.length === 0 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-center mt-12 bg-white/60 backdrop-blur-md p-8 rounded-2xl shadow-sm border border-white/40"
+          >
+            <p className="text-xl text-gray-600 mb-2">
+              Find the best deals across stores
+            </p>
+            <p className="text-gray-500">
+              Search for any product to see prices from Jumia, Kilimall, Amazon, and Jiji
+            </p>
+          </motion.div>
         )}
       </div>
     </div>

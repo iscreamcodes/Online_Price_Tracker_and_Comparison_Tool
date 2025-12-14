@@ -74,33 +74,38 @@ export async function fetchJumiaProducts(searchTerm = "laptop") {
     let products = await page.$$eval("article.prd, .c-prd", (elements) =>
       elements
         .map((el) => {
-          const name = el.querySelector("h3.name")?.textContent?.trim();
+          // --- FIXED NAME EXTRACTION ---
+          const name =
+            el.querySelector("h3.name")?.textContent?.trim() ||
+            el.querySelector("div.info h3")?.textContent?.trim() ||
+            el.querySelector("h3")?.textContent?.trim() ||
+            "";
+    
+          // PRICE
           const priceText = el.querySelector(".prc")?.textContent || "";
           const price = parseInt(priceText.replace(/[^\d]/g, ""), 10) || 0;
-
+    
+          // IMAGE
           const imgEl = el.querySelector("img");
-          const anchor = el.querySelector('a[data-pop-trig="lazy-img-zoom"]');
           let image =
             imgEl?.getAttribute("data-src") ||
             imgEl?.getAttribute("data-image") ||
-            anchor?.getAttribute("href") ||
             imgEl?.getAttribute("src") ||
             null;
-
-          if (image && image.includes("data:image/svg+xml")) image = null;
-
+    
+          if (image?.startsWith("//")) image = "https:" + image;
+    
+          // URL
           let url = el.querySelector("a.core")?.href || null;
           if (url?.startsWith("/")) url = "https://www.jumia.co.ke" + url;
-
-          if (image?.includes("/500x500/"))
-            image = image.replace("/500x500/", "/680x680/");
-
+    
           return name && price
             ? { name, price, currency: "KES", store: "Jumia", image, url }
             : null;
         })
         .filter(Boolean)
     );
+    
 
     // 🔍 FILTER RELEVANT PRODUCTS
     products = filterRelevantProducts(products, searchTerm);

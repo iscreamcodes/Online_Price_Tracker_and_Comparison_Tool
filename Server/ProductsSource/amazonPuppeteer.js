@@ -4,54 +4,76 @@ import { performance } from "perf_hooks";
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// 🎯 LENIENT FILTERING - Fixes spelling issues
+// Add currency conversion rates
+const CURRENCY_RATES = {
+  USD: 150, // 1 USD = 150 KES (approximate)
+  EUR: 160,
+  GBP: 190
+};
 function filterRelevantProducts(products, query) {
   if (!query || !products.length) return products;
 
-  const queryLower = query.toLowerCase();
-  const queryWords = queryLower.split(" ").filter(word => word.length > 2);
-
-  if (!queryWords.length) return products;
+  const qWords = query
+    .toLowerCase()
+    .split(" ")
+    .filter((w) => w.length > 2);
 
   return products.filter((p) => {
-    const productName = (p.name || "").toLowerCase();
-    
-    // 🎯 LENIENT MATCHING - Handle spelling variations
+    const name = (p.Product_Name || "").toLowerCase();
     let matches = 0;
-    
-    for (const word of queryWords) {
-      // Exact match
-      if (productName.includes(word)) {
+
+    for (const w of qWords) {
+      if (name.includes(w)) {
         matches++;
         continue;
       }
-      
-      // 🎯 HANDLE COMMON SPELLING MISTAKES
-      if (word === "vaccum" && productName.includes("vacuum")) {
+      if ((w === "vaccum" && name.includes("vacuum")) || (w === "vacuum" && name.includes("vaccum"))) {
         matches++;
         continue;
       }
-      if (word === "vacuum" && productName.includes("vaccum")) {
-        matches++;
-        continue;
-      }
-      
-      // Partial word matching
-      for (const productWord of productName.split(/\s+/)) {
-        if (productWord.includes(word) || word.includes(productWord)) {
+      for (const word of name.split(/\s+/)) {
+        if (word.includes(w) || w.includes(word)) {
           matches++;
           break;
         }
       }
     }
-    
-    // 🎯 LOWER THRESHOLD - Keep products that match at least one word
     return matches >= 1;
   });
 }
+// Extract and clean price with proper currency detection 
+function extractPriceAndCurrency(priceElement) {
+  if (!priceElement) return { price: 0, currency: 'USD' };
+  
+  const priceText = priceElement.textContent || '';
+  
+  // Extract currency symbol
+  let currency = 'USD';
+  if (priceText.includes('KES') || priceText.includes('KSh')) {
+    currency = 'KES';
+  } else if (priceText.includes('€') || priceText.includes('EUR')) {
+    currency = 'EUR';
+  } else if (priceText.includes('£') || priceText.includes('GBP')) {
+    currency = 'GBP';
+  }
+  
+  // Extract numeric price - handle various formats
+  const priceMatch = priceText.match(/([\d,]+\.?\d*)/);
+  if (priceMatch) {
+    const price = parseFloat(priceMatch[1].replace(/,/g, ''));
+    return { price, currency };
+  }
+  
+  return { price: 0, currency };
+}
+// Convert price to KES if needed 
+function convertToKES(price, fromCurrency) {
+  if (fromCurrency === 'KES') return price;
+  return price * (CURRENCY_RATES[fromCurrency] || 150);
+}
 
 export async function scrapeAmazon(searchTerm = "laptop") {
-  console.log(`🚀 Scraping Amazon for "${searchTerm}"...`);
+  console.log(` Scraping Amazon for "${searchTerm}"...`);
   const start = performance.now();
 
   const browser = await chromium.launch({
@@ -60,24 +82,22 @@ export async function scrapeAmazon(searchTerm = "laptop") {
   });
 
   const page = await browser.newPage({
-    userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
     viewport: { width: 1366, height: 768 },
   });
 
-  // 🎯 LESS AGGRESSIVE BLOCKING - Allow more resources for Amazon
+  /** Block only heavy external images + trackers */
   await page.route("**/*", (route) => {
-    const type = route.request().resourceType();
     const url = route.request().url();
-    
-    // Only block heavy images and trackers
-    if (type === "image" && !url.includes("amazon.com/images")) {
-      route.abort();
-    } else if (url.includes("google-analytics") || url.includes("adsystem")) {
-      route.abort();
-    } else {
-      route.continue();
+    const type = route.request().resourceType();
+
+    if (type === "image" && !url.includes("images-na.ssl-images-amazon.com")) {
+      return route.abort();
     }
+    if (url.includes("google-analytics") || url.includes("adsystem")) {
+      return route.abort();
+    }
+    return route.continue();
   });
 
   try {
@@ -85,114 +105,147 @@ export async function scrapeAmazon(searchTerm = "laptop") {
     console.log(`🌍 Navigating to: ${url}`);
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 
-    // 🎯 BETTER WAITING FOR AMAZON
-    await page.waitForSelector('[data-component-type="s-search-result"]', { timeout: 10000 });
-    
-    // Scroll to load more products
+    await page.waitForSelector('[data-component-type="s-search-result"]', { timeout: 15000 });
+
+    // Scroll to load enough results
     for (let i = 0; i < 5; i++) {
       await page.evaluate(() => window.scrollBy(0, 500));
-      await delay(500);
+      await delay(400);
     }
 
-    console.log("⏳ Extracting products...");
+    console.log("⏳ Extracting Amazon products...");
 
-    // 🎯 BETTER AMAZON SELECTORS
     const products = await page.$$eval(
       '[data-component-type="s-search-result"]',
-      (elements, searchTerm) => {
+      (elements) => {
         return elements
           .map((el) => {
             try {
-              const name =
+              // Get name - try multiple selectors
+              const name = 
                 el.querySelector("h2 a span")?.textContent?.trim() ||
+                el.querySelector("h2 .a-text-normal")?.textContent?.trim() ||
                 el.querySelector("h2")?.textContent?.trim() ||
-                el.querySelector(".a-text-normal")?.textContent?.trim();
-              
-              const linkElement = el.querySelector("h2 a") || el.querySelector("a.a-link-normal");
-              const link = linkElement?.href;
-              
-              const image =
+                null;
+
+              if (!name) return null;
+
+              // Get URL
+              const urlElement = el.querySelector("h2 a") || el.querySelector("a.a-link-normal");
+              const url = urlElement?.href || null;
+
+              // Get image
+              const image = 
                 el.querySelector("img.s-image")?.src ||
-                el.querySelector("img")?.src;
+                el.querySelector("img")?.src ||
+                null;
+
+              // 🆕 IMPROVED PRICE EXTRACTION
+              let price = 0;
+              let currency = 'USD';
               
-              const priceText =
-                el.querySelector(".a-price .a-offscreen")?.textContent ||
-                el.querySelector(".a-price-whole")?.textContent ||
-                el.querySelector(".a-color-base")?.textContent ||
-                "0";
+              // Method 1: Check for KES prices first
+              const kesPriceElement = el.querySelector('.a-price .a-price-symbol');
+              if (kesPriceElement?.textContent?.includes('KES')) {
+                const whole = el.querySelector('.a-price-whole')?.textContent?.replace(/[^\d]/g, '');
+                const fraction = el.querySelector('.a-price-fraction')?.textContent?.replace(/[^\d]/g, '');
+                if (whole) {
+                  price = parseFloat(whole + '.' + (fraction || '00'));
+                  currency = 'KES';
+                }
+              }
               
+              // Method 2: Standard price extraction (USD)
+              if (!price) {
+                const priceWhole = el.querySelector(".a-price-whole")?.textContent;
+                const priceFraction = el.querySelector(".a-price-fraction")?.textContent;
+                if (priceWhole) {
+                  price = parseFloat(
+                    (priceWhole.replace(/[^\d]/g, "") + "." + (priceFraction || "00").replace(/[^\d]/g, ""))
+                  );
+                  currency = 'USD';
+                }
+              }
+              
+              // Method 3: Price range or other formats
+              if (!price) {
+                const priceRange = el.querySelector(".a-price .a-offscreen")?.textContent;
+                if (priceRange) {
+                  const match = priceRange.match(/\$?([\d,]+\.?\d*)/);
+                  if (match) {
+                    price = parseFloat(match[1].replace(/,/g, ""));
+                    currency = priceRange.includes('$') ? 'USD' : 'KES';
+                  }
+                }
+              }
+
+              // Get rating
               const ratingText = el.querySelector(".a-icon-alt")?.textContent;
               const rating = ratingText ? parseFloat(ratingText.split(" ")[0]) : null;
 
-              let price = null;
-              if (priceText && priceText !== "0") {
-                const match = priceText.replace(/[^\d.,]/g, "").match(/[\d.,]+/);
-                if (match) price = parseFloat(match[0].replace(/,/g, ""));
-              }
-
-              // 🎯 BETTER VALIDATION
-              if (name && price && price > 0 && image && link) {
-                return {
-                  name,
-                  price,
-                  currency: "USD", // Amazon is always USD
-                  image,
-                  url: link.startsWith("http") ? link : `https://amazon.com${link}`,
-                  rating,
-                  store: "Amazon",
-                };
-              }
+              // Return in format that normalizeProduct expects
+              return {
+                // Product schema fields
+                Product_Name: name,
+                Product_Category: "Electronics",
+                Product_Category_code: "CAT_ELECTRONICS",
+                Product_Image_URL: image || "",
+                
+                // Listing schema fields - STORE IN KES
+                Listing_Price: currency === 'KES' ? price : price * 150, // Convert to KES
+                Listing_Currency: "KES", // Always store in KES
+                Listing_Store_Name: "Amazon",
+                Listing_URL: url ? (url.startsWith("http") ? url : `https://amazon.com${url}`) : "",
+                Listing_Image_URL: image || "",
+                
+                // Additional fields for debugging
+                originalPrice: price,
+                originalCurrency: currency,
+                rating: rating,
+                
+                // Keep original fields for compatibility
+                name: name,
+                price: currency === 'KES' ? price : price * 150, // Convert to KES
+                currency: "KES", // Always KES
+                store: "Amazon",
+                url: url ? (url.startsWith("http") ? url : `https://amazon.com${url}`) : "",
+                image: image || "",
+              };
             } catch (e) {
-              // Silent fail for individual products
+              console.log("Error parsing product:", e);
+              return null;
             }
-            return null;
           })
-          .filter(Boolean);
-      },
-      searchTerm
+          .filter(product => product && product.Product_Name && product.Product_Name.length > 3);
+      }
     );
 
-    console.log(`📦 Raw Amazon results: ${products.length} products`);
-    
-    // 🎯 DEBUG: Show what Amazon found before filtering
+    console.log(`📦 Raw products found: ${products.length}`);
+
+    // Debug: Show what we found with currency info
     if (products.length > 0) {
-      console.log("🔍 Amazon raw products (before filtering):");
-      products.slice(0, 5).forEach((p, i) => {
-        console.log(`   ${i+1}. ${p.name} - $${p.price}`);
+      console.log("\n🔍 DEBUG - First 3 products found:");
+      products.slice(0, 3).forEach((p, i) => {
+        console.log(`   ${i+1}. Product_Name: "${p.Product_Name}"`);
+        console.log(`      Original Price: ${p.originalPrice} ${p.originalCurrency}`);
+        console.log(`      Final Price: KES ${p.Listing_Price}`);
+        console.log(`      Listing_URL: ${p.Listing_URL ? 'Yes' : 'No'}`);
       });
     }
 
-    const normalized = products.map((p) => normalizeProduct(p));
-
-    // 🔍 LENIENT FILTERING
+    // Now normalizeProduct will work correctly
+    const normalized = products.map((p) => normalizeProduct(p, "Amazon"));
     const filtered = filterRelevantProducts(normalized, searchTerm);
 
-    const duration = ((performance.now() - start) / 1000).toFixed(2);
-    console.log(`✅ Extracted ${filtered.length} relevant products in ${duration}s`);
-
-    // 🎯 DEBUG: Show final results
-    if (filtered.length === 0 && products.length > 0) {
-      console.log("⚠️  All products were filtered out. Check filtering logic.");
-    }
+    const time = ((performance.now() - start) / 1000).toFixed(2);
+    console.log(`✅ Done. ${filtered.length} relevant products in ${time}s`);
 
     return filtered;
   } catch (err) {
-    console.error(`❌ Amazon scraper error: ${err.message}`);
+    console.error(`❌ Amazon scraper failed:`, err.message);
     return [];
   } finally {
     await browser.close();
-    console.log("✅ Browser closed (Amazon)");
+    console.log("🔒 Browser closed (Amazon)");
   }
-}
-
-// 🧪 Standalone test with debug
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const term = process.argv[2] || "vacuum cleaner";
-  console.log(`🧪 Testing Amazon with: "${term}"`);
-  scrapeAmazon(term).then((products) => {
-    console.log(`\n🎉 Final: ${products.length} products:`);
-    products.forEach((p, i) => {
-      console.log(`${i+1}. ${p.name} - $${p.price}`);
-    });
-  });
 }
